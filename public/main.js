@@ -14,28 +14,45 @@ const MAX_CONTEXT_LENGTH = 3000;
 function appendMessage(sender, text, html = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${sender}`;
-    messageDiv.innerHTML = `<div class="bubble">${html ? text : text.replace(/\n/g, '<br>')}</div>`;
+    const content = html ? text : text.replace(/\n/g, '<br>');
+    messageDiv.innerHTML = `<div class="bubble">${content}</div>`;
     chatWindow.appendChild(messageDiv);
     chatWindow.scrollTop = chatWindow.scrollHeight;
+    return messageDiv;
 }
 
 function initializeKuromoji() {
     return new Promise((resolve, reject) => {
-        statusDiv.textContent = "1/2: ファイルをロード中...";
+        statusDiv.textContent = "1/2: 辞書ファイルをロード中...";
 
         kuromoji.builder({ dicPath: "./dict" }).build(function(err, t) {
-            if (err) reject(err);
-            else resolve(t);
+            if (err) {
+                console.error("Kuromoji辞書ロードエラー:", err);
+                reject(new Error("Kuromojiの辞書ファイルをロードできませんでした。'./dict' の配置を確認してください。"));
+            } else {
+                resolve(t);
+            }
         });
     });
 }
 
 async function initializeWebLLM() {
     statusDiv.textContent = "2/2: モデルをロード中...";
-    
-    const engine = await CreateMLCEngine(LLM_MODEL);
-    
-    return engine; 
+
+    try {
+        const engine = await CreateMLCEngine(LLM_MODEL, { 
+            initProgressCallback: (info) => {
+                if (info.progress && info.total) {
+                    const percentage = Math.round((info.progress / info.total) * 100);
+                    statusDiv.textContent = `2/2: モデルをロード中... (${percentage}%)`;
+                }
+            }
+        });
+        return engine;
+    } catch (e) {
+        console.error("Web-LLM初期化エラー:", e);
+        throw new Error(`Web-LLMのロードに失敗しました: ${e.message}`);
+    }
 }
 
 async function fetchWikipediaArticles(keyword) {
@@ -71,30 +88,28 @@ async function fetchWikipediaArticles(keyword) {
         return { success: true, text: combinedText, sources: sources };
 
     } catch (error) {
-        return { success: false, text: "検索エラーが発生しました。" };
+        return { success: false, text: "Wikipedia検索でエラーが発生しました。" };
     }
 }
 
 async function generateLLMResponse(prompt) {
     let aiResponse = "";
-    let aiMessageElement = document.createElement('div');
-    aiMessageElement.className = 'message ai';
-    aiMessageElement.innerHTML = `<div class="bubble">...</div>`;
-    chatWindow.appendChild(aiMessageElement);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
+    const aiMessageElement = appendMessage('ai', '...');
+    const bubbleElement = aiMessageElement.querySelector('.bubble');
 
     const callback = (step, message) => {
         aiResponse += message;
-        aiMessageElement.querySelector('.bubble').textContent = aiResponse;
+        bubbleElement.textContent = aiResponse;
         chatWindow.scrollTop = chatWindow.scrollHeight;
     };
 
     try {
-        // llmChatModule（= engine）の generate メソッドを呼び出す
         await llmChatModule.generate(prompt, callback);
+        
     } catch (error) {
-        aiMessageElement.querySelector('.bubble').textContent += ` (Error: ${error.message})`;
+        bubbleElement.textContent += ` (エラー: ${error.message})`;
     }
+    chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
 async function processUserInput() {
@@ -105,9 +120,17 @@ async function processUserInput() {
     inputElement.value = ''; 
     searchButton.disabled = true;
 
-    appendMessage('ai', "Wikipediaで関連情報を検索中...");
+    const tokens = kuromojiTokenizer.tokenize(userInput);
+    const searchKeywords = Array.from(new Set(tokens
+        .filter(t => t.pos === '名詞' && t.basic_form !== '*')
+        .map(t => t.basic_form)
+    )).slice(0, 5).join(' ');
 
-    const wikiResult = await fetchWikipediaArticles(userInput);
+    const searchQuery = searchKeywords || userInput;
+    
+    appendMessage('ai', `Wikipediaで「${searchQuery}」の関連情報を検索中...`);
+
+    const wikiResult = await fetchWikipediaArticles(searchQuery);
 
     if (!wikiResult.success) {
         appendMessage('ai', wikiResult.text);
@@ -117,20 +140,15 @@ async function processUserInput() {
 
     const context = wikiResult.text.substring(0, MAX_CONTEXT_LENGTH);
 
-    const tokens = kuromojiTokenizer.tokenize(userInput);
-    const importantKeywords = Array.from(new Set(tokens
-        .filter(t => (t.pos === '名詞' || t.pos === '動詞') && t.basic_form !== '*')
-        .map(t => t.basic_form)
-    )).slice(0, 10).join(', ');
-
     appendMessage('ai', `参照記事 ${wikiResult.sources.length} 件を取得しました。回答を生成します。`);
 
     const llmPrompt = `
-あなたは、提供された[参照情報]に基づいてユーザーの質問に答えるAIアシスタントです。
+あなたは、提供された[参照情報]のみに基づいてユーザーの質問に答えるAIアシスタントです。
 以下の制約を守り、参照情報の内容を用いて、[質問]に自然な日本語で回答してください。
 
-[重要キーワード]
-${importantKeywords}
+[重要制約]
+1. [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
+2. 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
 
 [参照情報]
 ${context}
@@ -142,6 +160,7 @@ ${userInput}
 `;
 
     await generateLLMResponse(llmPrompt);
+    
     appendMessage('ai', `<small>参照元: ${wikiResult.sources.join(', ')}</small>`, true);
 
     searchButton.disabled = false;
@@ -149,6 +168,9 @@ ${userInput}
 
 async function init() {
     try {
+        inputElement.disabled = true;
+        searchButton.disabled = true;
+
         kuromojiTokenizer = await initializeKuromoji();
         llmChatModule = await initializeWebLLM();
 
@@ -159,8 +181,11 @@ async function init() {
         appendMessage('ai', "システム準備完了。質問を入力してください。", true);
 
     } catch (e) {
-        statusDiv.textContent = `Error: ${e.message}`;
+        statusDiv.textContent = `初期化エラー: ${e.message}`;
         console.error(e);
+        inputElement.disabled = true;
+        searchButton.disabled = true;
+        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n(${e.message})`, true);
     }
 }
 
