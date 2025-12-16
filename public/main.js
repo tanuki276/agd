@@ -8,15 +8,18 @@ const loginArea = document.getElementById('login-area');
 const usernameInput = document.getElementById('username-input');
 const loginButton = document.getElementById('login-button');
 const appContent = document.querySelector('.app-content');
+const progressBar = document.getElementById('progress-bar');
+const modelSelect = document.getElementById('model-select');
 
 let kuromojiTokenizer = null;
 let llmChatModule = null;
 let userName = null;
+let currentLLMModel = modelSelect ? modelSelect.value : "Phi-2-v2-q4f16_1";
+
 const chatHistory = [];
-const MAX_CONTEXT_TOKENS = 3000;
+const MAX_CONTEXT_TOKENS = 2500;
 const HISTORY_CHAR_LIMIT = 1000;
 
-const LLM_MODEL = "Mistral-7B-Instruct-v0.2-q4f16_1";
 const LLM_CONFIG = {
     temperature: 0.1,
     repetition_penalty: 1.1,
@@ -50,7 +53,6 @@ async function initializeKuromoji() {
     if (typeof kuromoji === 'undefined') {
         throw new Error("kuromoji library is not loaded.");
     }
-    
     return new Promise((resolve, reject) => {
         kuromoji.builder({ dicPath: DICT_BASE_URL }).build(function(err, tokenizer) {
             if (err) {
@@ -66,26 +68,32 @@ async function initializeWebLLM() {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     
-    if (isIOS || isSafari) {
-        statusDiv.textContent = "警告: iOS/Safari環境はメモリ制限により動作が不安定になる可能性があります。";
+    if (isIOS || isSafari && currentLLMModel.includes('7B')) {
+        statusDiv.textContent = "警告: 7BモデルはiOS/Safari環境では動作不安定の可能性があります。";
     } else {
-        statusDiv.textContent = "モデルファイルをダウンロード中...";
+        statusDiv.textContent = `${currentLLMModel} を準備中...`;
     }
 
+    if(progressBar) progressBar.style.width = '0%';
+
     try {
-        const engine = await CreateMLCEngine(LLM_MODEL, { 
+        const engine = await CreateMLCEngine(currentLLMModel, { 
             initProgressCallback: (info) => {
+                let percentage = 0;
                 if (info.progress && info.total) {
-                    const percentage = Math.round((info.progress / info.total) * 100);
-                    statusDiv.textContent = `モデルロード中... ${percentage}% (${info.text})`;
+                    percentage = Math.round((info.progress / info.total) * 100);
+                    statusDiv.textContent = `ロード中... ${percentage}% (${info.text})`;
                 } else if (info.text) {
-                     statusDiv.textContent = `エンジン準備中... ${info.text}`;
+                     statusDiv.textContent = `準備中... ${info.text}`;
                 }
+                if(progressBar) progressBar.style.width = `${percentage}%`;
             }
         });
+        if(progressBar) progressBar.style.width = '100%';
         return engine;
     } catch (e) {
-        throw new Error(`Web-LLM init failed: ${e.message}`);
+        if(progressBar) progressBar.style.width = '0%';
+        throw new Error(`Web-LLM Init Error: ${e.message}`);
     }
 }
 
@@ -93,35 +101,35 @@ async function init() {
     try {
         inputElement.disabled = true;
         searchButton.disabled = true;
+        if (modelSelect) modelSelect.disabled = true;
 
         statusDiv.textContent = "辞書データをロード中...";
         kuromojiTokenizer = await initializeKuromoji();
         
-        statusDiv.textContent = "LLMエンジンを起動中...";
+        statusDiv.textContent = `${currentLLMModel} エンジン起動中...`;
         llmChatModule = await initializeWebLLM();
 
         statusDiv.textContent = "準備完了";
         inputElement.disabled = false;
         searchButton.disabled = false;
+        if (modelSelect) modelSelect.disabled = false;
 
-        appendMessage('ai', "システム準備完了。質問を入力してください。", true);
+        appendMessage('ai', `準備完了 (${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'})。質問をどうぞ。`, true);
 
     } catch (e) {
         statusDiv.textContent = `エラー: ${e.message}`;
         inputElement.disabled = true;
         searchButton.disabled = true;
+        if (modelSelect) modelSelect.disabled = true;
         appendMessage('ai', `**初期化エラー**\n${e.message}`, true);
     }
 }
 
 async function fetchWikipediaArticles(keyword) {
     const apiUrl = 'https://ja.wikipedia.org/w/api.php';
-    
     const searchParams = {
         action: 'query', format: 'json', origin: '*',
-        list: 'search',
-        srsearch: keyword,
-        srlimit: 4
+        list: 'search', srsearch: keyword, srlimit: 4
     };
 
     try {
@@ -133,14 +141,10 @@ async function fetchWikipediaArticles(keyword) {
         }
         
         const pageIds = searchData.query.search.map(r => r.pageid).join('|');
-
         const extractParams = {
             action: 'query', format: 'json', origin: '*',
-            pageids: pageIds,
-            prop: 'extracts',
-            explaintext: true,
-            exintro: true,
-            redirects: 1
+            pageids: pageIds, prop: 'extracts',
+            explaintext: true, exintro: true, redirects: 1
         };
 
         const extractRes = await fetch(apiUrl + '?' + new URLSearchParams(extractParams).toString());
@@ -155,7 +159,6 @@ async function fetchWikipediaArticles(keyword) {
             if (article.extract) {
                 let cleanExtract = article.extract.replace(/\n{2,}/g, '\n').trim();
                 cleanExtract = cleanExtract.replace(/\.\.\.$/g, ''); 
-                
                 if (cleanExtract.length > 20) {
                     combinedText += `\n[記事: ${article.title}]\n${cleanExtract}\n`;
                     sources.push(article.title);
@@ -166,7 +169,6 @@ async function fetchWikipediaArticles(keyword) {
         if (combinedText.length === 0) {
              return { success: false, text: "記事本文の取得に失敗しました。" };
         }
-        
         return { success: true, text: combinedText, sources: sources };
 
     } catch (error) {
@@ -193,10 +195,7 @@ function prioritizeContext(context, userInput) {
                 score += 1;
             }
         }
-        if (sentence.startsWith('[記事:')) {
-            score += 5;
-        }
-
+        if (sentence.startsWith('[記事:')) score += 5;
         if (score > 0 || sentence.startsWith('[記事:')) {
             scoredSentences.push({ sentence, score });
         }
@@ -205,7 +204,6 @@ function prioritizeContext(context, userInput) {
     scoredSentences.sort((a, b) => b.score - a.score);
 
     let finalContext = "";
-    
     for (const item of scoredSentences) {
         if ((finalContext.length + item.sentence.length) < MAX_CONTEXT_TOKENS) {
             finalContext += item.sentence + '\n';
@@ -213,7 +211,6 @@ function prioritizeContext(context, userInput) {
             break; 
         }
     }
-
     return finalContext.trim();
 }
 
@@ -230,18 +227,14 @@ function validateLLMResponse(response, context) {
 
     const contextSet = new Set(contextTokens);
     let overlap = 0;
-
     for (const rToken of responseTokens) {
-        if (contextSet.has(rToken)) {
-            overlap++;
-        }
+        if (contextSet.has(rToken)) overlap++;
     }
 
     const totalResponseNouns = responseTokens.length;
     if (totalResponseNouns > 5 && (overlap / totalResponseNouns) < 0.15) {
-        return `[回答破棄] 生成された回答は参照情報に基づいていると確認できませんでした。\n(一致率: ${Math.round((overlap/totalResponseNouns)*100)}%)`;
+        return `[回答破棄] 生成回答が参照情報に基づいていると確認できませんでした。(一致率: ${Math.round((overlap/totalResponseNouns)*100)}%)`;
     }
-    
     return response;
 }
 
@@ -251,7 +244,6 @@ function buildFullPrompt(context, userInput) {
         const msg = chatHistory[i];
         const role = msg.role === 'user' ? 'ユーザー' : 'AI';
         const line = `[ ${role} ] ${msg.content}\n`;
-
         if ((historyText.length + line.length) < HISTORY_CHAR_LIMIT) {
             historyText = line + historyText;
         } else {
@@ -260,7 +252,6 @@ function buildFullPrompt(context, userInput) {
     }
 
     const systemPrompt = SYSTEM_PROMPT.replace('[USERNAME]', userName || 'ユーザー');
-
     return `
 ${systemPrompt}
 [過去の会話履歴]
@@ -301,9 +292,8 @@ async function generateLLMResponse(prompt, contextForValidation) {
         } else {
             chatHistory.push({ role: 'assistant', content: aiResponse });
         }
-
     } catch (error) {
-        bubbleElement.textContent += ` (GenError: ${error.message})`;
+        bubbleElement.textContent += ` (エラー: ${error.message})`;
     }
     chatWindow.scrollTop = chatWindow.scrollHeight;
 }
@@ -325,11 +315,9 @@ async function processUserInput() {
     )).slice(0, 4).join(' ');
 
     const searchQuery = searchKeywords || userInput;
-
     appendMessage('ai', `検索中: ${searchQuery}`);
 
     const wikiResult = await fetchWikipediaArticles(searchQuery);
-
     if (!wikiResult.success) {
         appendMessage('ai', wikiResult.text);
         chatHistory.push({ role: 'assistant', content: wikiResult.text });
@@ -338,9 +326,8 @@ async function processUserInput() {
     }
 
     const context = prioritizeContext(wikiResult.text, userInput);
-
     if (context.length === 0) {
-        appendMessage('ai', "有効なコンテキストが抽出できませんでした。");
+        appendMessage('ai', "有効な情報が見つかりませんでした。");
         searchButton.disabled = false;
         return;
     }
@@ -350,22 +337,36 @@ async function processUserInput() {
 
     const sourceMessage = `<small>Sources: ${wikiResult.sources.join(', ')}</small>`;
     appendMessage('ai', sourceMessage, true);
-
     searchButton.disabled = false;
+}
+
+function handleModelChange() {
+    if (modelSelect && currentLLMModel !== modelSelect.value) {
+        if (llmChatModule && typeof llmChatModule.unload === 'function') {
+             llmChatModule.unload();
+        }
+        llmChatModule = null;
+        chatHistory.length = 0; 
+        currentLLMModel = modelSelect.value;
+        appendMessage('ai', `モデルを **${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'}** に変更しました。再ロードします...`, true);
+        init();
+    }
 }
 
 function handleLogin() {
     const inputName = usernameInput.value.trim();
     if (!inputName) {
-        alert("Enter Name");
+        alert("名前を入力してください");
         return;
     }
     userName = inputName;
-
     loginArea.style.display = 'none';
     appContent.style.display = 'block';
     chatWindow.innerHTML = ''; 
-
+    
+    if (modelSelect) modelSelect.addEventListener('change', handleModelChange);
+    if (modelSelect) currentLLMModel = modelSelect.value;
+    
     init();
 }
 
