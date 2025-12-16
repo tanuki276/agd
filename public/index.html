@@ -19,13 +19,13 @@
         }
 
         .message { margin-bottom: 15px; display: flex; }
-        
+
         .user { justify-content: flex-end; }
         .user .bubble { background-color: #dcf8c6; margin-left: auto; color: #1f2d3d; }
-        
+
         .ai { justify-content: flex-start; }
         .ai .bubble { background-color: #fff; margin-right: auto; border: 1px solid #eee; color: #333; }
-        
+
         .bubble { 
             max-width: 80%; 
             padding: 10px 12px; 
@@ -59,9 +59,9 @@
     </style>
 </head>
 <body>
-    <h1>Wikipedia RAG チャットボット</h1>
+    <h1>チャットボット</h1>
     <div id="loading-status">システムを初期化中...</div>
-    
+
     <div id="chat-window">
         <div class="message ai">
             <div class="bubble">
@@ -69,14 +69,14 @@
             </div>
         </div>
     </div>
-    
+
     <div class="input-area">
         <input type="text" id="keyword-input" placeholder="質問を入力してください" disabled>
         <button id="search-button" disabled>送信</button>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
-    
+    <script src="../dict/kuromoji.js"></script>
+
     <script type="module" src="./main.js"></script>
 </body>
 </html>
