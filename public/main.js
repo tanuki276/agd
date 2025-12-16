@@ -1,15 +1,35 @@
 import { CreateMLCEngine } from '@mlc-ai/web-llm';
-import * as kuromoji from 'kuromoji'; 
 
 const inputElement = document.getElementById('keyword-input');
 const searchButton = document.getElementById('search-button');
 const chatWindow = document.getElementById('chat-window');
 const statusDiv = document.getElementById('loading-status');
+const loginArea = document.getElementById('login-area');
+const usernameInput = document.getElementById('username-input');
+const loginButton = document.getElementById('login-button');
+const appContent = document.querySelector('.app-content');
 
 let kuromojiTokenizer = null;
 let llmChatModule = null;
+let userName = null;
+const chatHistory = []; 
+
 const LLM_MODEL = "Mistral-7B-Instruct-v0.2-q4f16_1";
-const MAX_CONTEXT_LENGTH = 3000;
+const MAX_CONTEXT_LENGTH = 2500; 
+
+const DIC_PATHS = [
+    'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict',
+    './dict'
+];
+
+const SYSTEM_PROMPT = `
+あなたは、親しみやすく丁寧な言葉遣いをするAIアシスタントです。
+ユーザー名: [USERNAME]
+以下の[参照情報]に書かれていることのみを使い、質問に回答してください。
+[重要制約]
+1. [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
+2. 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
+`;
 
 function appendMessage(sender, text, html = false) {
     const messageDiv = document.createElement('div');
@@ -21,19 +41,33 @@ function appendMessage(sender, text, html = false) {
     return messageDiv;
 }
 
-function initializeKuromoji() {
-    return new Promise((resolve, reject) => {
-        statusDiv.textContent = "1/2: 辞書ファイルをロード中...";
+async function initializeKuromoji() {
+    if (typeof kuromoji === 'undefined') {
+        throw new Error("kuromojiライブラリがロードされていません。index.htmlの<script>タグを確認してください。");
+    }
 
-        kuromoji.builder({ dicPath: "./dict" }).build(function(err, t) {
-            if (err) {
-                console.error("Kuromoji辞書ロードエラー:", err);
-                reject(new Error("Kuromojiの辞書ファイルをロードできませんでした。'./dict' の配置を確認してください。"));
-            } else {
-                resolve(t);
+    for (let i = 0; i < DIC_PATHS.length; i++) {
+        const dicPath = DIC_PATHS[i];
+        statusDiv.textContent = `1/2: 辞書ファイルをロード中... (${i + 1}回目: ${dicPath})`;
+
+        try {
+            const tokenizer = await new Promise((resolve, reject) => {
+                kuromoji.builder({ dicPath: dicPath }).build(function(err, t) {
+                    if (err) reject(err);
+                    else resolve(t);
+                });
+            });
+            statusDiv.textContent = `1/2: 辞書ロード成功 (${dicPath})`;
+            return tokenizer;
+
+        } catch (err) {
+            console.warn(`Kuromoji辞書ロード失敗 (${dicPath}): `, err);
+            if (i === DIC_PATHS.length - 1) {
+                throw new Error("Kuromoji辞書ファイルのロードに失敗しました。CDNまたはローカルの './dict' の配置を確認してください。");
             }
-        });
-    });
+        }
+    }
+    throw new Error("すべてのKuromoji辞書パスの試行が失敗しました。");
 }
 
 async function initializeWebLLM() {
@@ -52,6 +86,29 @@ async function initializeWebLLM() {
     } catch (e) {
         console.error("Web-LLM初期化エラー:", e);
         throw new Error(`Web-LLMのロードに失敗しました: ${e.message}`);
+    }
+}
+
+async function init() {
+    try {
+        inputElement.disabled = true;
+        searchButton.disabled = true;
+
+        kuromojiTokenizer = await initializeKuromoji();
+        llmChatModule = await initializeWebLLM();
+
+        statusDiv.textContent = "準備完了";
+        inputElement.disabled = false;
+        searchButton.disabled = false;
+
+        appendMessage('ai', "システム準備完了。質問を入力してください。", true);
+
+    } catch (e) {
+        statusDiv.textContent = `初期化エラー: ${e.message}`;
+        console.error(e);
+        inputElement.disabled = true;
+        searchButton.disabled = true;
+        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n(${e.message})`, true);
     }
 }
 
@@ -92,6 +149,31 @@ async function fetchWikipediaArticles(keyword) {
     }
 }
 
+function buildFullPrompt(context, userInput) {
+    const historyText = chatHistory.map(msg => 
+        `[ ${msg.sender === 'user' ? 'ユーザー' : 'AI'} ] ${msg.text}`
+    ).join('\n');
+
+    const recentHistory = historyText.split('\n').slice(-5).join('\n');
+
+    const systemPrompt = SYSTEM_PROMPT.replace('[USERNAME]', userName || 'ユーザー');
+
+    return `
+${systemPrompt}
+
+[過去の会話履歴（直近の5ターン）]
+${recentHistory}
+
+[参照情報]
+${context}
+
+[質問]
+${userInput}
+
+[回答]
+`;
+}
+
 async function generateLLMResponse(prompt) {
     let aiResponse = "";
     const aiMessageElement = appendMessage('ai', '...');
@@ -105,7 +187,7 @@ async function generateLLMResponse(prompt) {
 
     try {
         await llmChatModule.generate(prompt, callback);
-        
+        chatHistory.push({ sender: 'ai', text: aiResponse });
     } catch (error) {
         bubbleElement.textContent += ` (エラー: ${error.message})`;
     }
@@ -117,6 +199,8 @@ async function processUserInput() {
     if (!userInput || !llmChatModule || !kuromojiTokenizer) return;
 
     appendMessage('user', userInput);
+    chatHistory.push({ sender: 'user', text: userInput });
+    
     inputElement.value = ''; 
     searchButton.disabled = true;
 
@@ -133,7 +217,9 @@ async function processUserInput() {
     const wikiResult = await fetchWikipediaArticles(searchQuery);
 
     if (!wikiResult.success) {
-        appendMessage('ai', wikiResult.text);
+        const failureMessage = wikiResult.text;
+        appendMessage('ai', failureMessage);
+        chatHistory.push({ sender: 'ai', text: failureMessage });
         searchButton.disabled = false;
         return;
     }
@@ -142,58 +228,42 @@ async function processUserInput() {
 
     appendMessage('ai', `参照記事 ${wikiResult.sources.length} 件を取得しました。回答を生成します。`);
 
-    const llmPrompt = `
-あなたは、提供された[参照情報]のみに基づいてユーザーの質問に答えるAIアシスタントです。
-以下の制約を守り、参照情報の内容を用いて、[質問]に自然な日本語で回答してください。
+    const fullPrompt = buildFullPrompt(context, userInput);
 
-[重要制約]
-1. [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
-2. 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
-
-[参照情報]
-${context}
-
-[質問]
-${userInput}
-
-[回答]
-`;
-
-    await generateLLMResponse(llmPrompt);
+    await generateLLMResponse(fullPrompt);
     
-    appendMessage('ai', `<small>参照元: ${wikiResult.sources.join(', ')}</small>`, true);
+    const sourceMessage = `<small>参照元: ${wikiResult.sources.join(', ')}</small>`;
+    appendMessage('ai', sourceMessage, true);
 
     searchButton.disabled = false;
 }
 
-async function init() {
-    try {
-        inputElement.disabled = true;
-        searchButton.disabled = true;
-
-        kuromojiTokenizer = await initializeKuromoji();
-        llmChatModule = await initializeWebLLM();
-
-        statusDiv.textContent = "準備完了";
-        inputElement.disabled = false;
-        searchButton.disabled = false;
-
-        appendMessage('ai', "システム準備完了。質問を入力してください。", true);
-
-    } catch (e) {
-        statusDiv.textContent = `初期化エラー: ${e.message}`;
-        console.error(e);
-        inputElement.disabled = true;
-        searchButton.disabled = true;
-        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n(${e.message})`, true);
+function handleLogin() {
+    const inputName = usernameInput.value.trim();
+    if (!inputName) {
+        alert("ユーザー名を入力してください。");
+        return;
     }
+    userName = inputName;
+    
+    loginArea.style.display = 'none';
+    appContent.style.display = 'block';
+    chatWindow.innerHTML = ''; 
+    
+    appendMessage('ai', `**${userName}**さん、こんにちは！RAGチャットシステムを起動します。\nモデルと辞書の読み込みを開始します。`);
+
+    init();
 }
 
+loginButton.addEventListener('click', handleLogin);
+usernameInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        handleLogin();
+    }
+});
 searchButton.addEventListener('click', processUserInput);
 inputElement.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !searchButton.disabled) {
         processUserInput();
     }
 });
-
-init();
