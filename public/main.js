@@ -1,5 +1,4 @@
 import { CreateMLCEngine } from '@mlc-ai/web-llm';
-
 const inputElement = document.getElementById('keyword-input');
 const searchButton = document.getElementById('search-button');
 const chatWindow = document.getElementById('chat-window');
@@ -8,302 +7,358 @@ const loginArea = document.getElementById('login-area');
 const usernameInput = document.getElementById('username-input');
 const loginButton = document.getElementById('login-button');
 const appContent = document.querySelector('.app-content');
-
 let kuromojiTokenizer = null;
 let llmChatModule = null;
 let userName = null;
-const chatHistory = []; 
-
+const chatHistory = [];
+const MAX_CONTEXT_TOKENS = 3000;
+const HISTORY_CHAR_LIMIT = 1000;
 const LLM_MODEL = "Mistral-7B-Instruct-v0.2-q4f16_1";
-const MAX_CONTEXT_LENGTH = 2500; 
-
-const DIC_PATHS = [
-    'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict',
-    './dict'
-];
-
+const LLM_CONFIG = {
+temperature: 0.1,
+repetition_penalty: 1.1,
+top_p: 0.9
+};
+const DICT_BASE_URL = 'https://tanuki276.github.io/agd/dict/';
 const SYSTEM_PROMPT = `
 あなたは、親しみやすく丁寧な言葉遣いをするAIアシスタントです。
 ユーザー名: [USERNAME]
 以下の[参照情報]に書かれていることのみを使い、質問に回答してください。
+回答は必ず[参照情報]に含まれる固有名詞やキーワードを複数回使用し、根拠を明確にしてください。
 [重要制約]
-1. [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
-2. 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
-`;
-
+ * [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
+ * 情報が不足している場合は正直に「提供された情報からは分かりません」と答えてください。
+ * 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
+   `;
 function appendMessage(sender, text, html = false) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${sender}`;
-    const content = html ? text : text.replace(/\n/g, '<br>');
-    messageDiv.innerHTML = `<div class="bubble">${content}</div>`;
-    chatWindow.appendChild(messageDiv);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-    return messageDiv;
+const messageDiv = document.createElement('div');
+messageDiv.className = message ${sender};
+const content = html ? text : text.replace(/\n/g, '
+');
+messageDiv.innerHTML = <div class="bubble">${content}</div>;
+chatWindow.appendChild(messageDiv);
+chatWindow.scrollTop = chatWindow.scrollHeight;
+return messageDiv;
 }
-
-/**
- * ステータス表示とエラーログを改善
- */
 async function initializeKuromoji() {
-    console.log("--- 1/2 Kuromoji辞書初期化開始 ---");
-
-    if (typeof kuromoji === 'undefined') {
-        throw new Error("kuromojiライブラリ本体がロードされていません。index.htmlを確認してください。");
-    }
-
-    for (let i = 0; i < DIC_PATHS.length; i++) {
-        const dicPath = DIC_PATHS[i];
-        statusDiv.textContent = `1/2: 辞書ファイルをロード中... (試行${i + 1}/${DIC_PATHS.length}: ${dicPath})`;
-        console.log(`[Kuromoji] 試行開始: ${dicPath}`);
-
-        try {
-            const tokenizer = await new Promise((resolve, reject) => {
-                kuromoji.builder({ dicPath: dicPath }).build(function(err, t) {
-                    if (err) reject(err);
-                    else resolve(t);
-                });
-            });
-            
-            // 成功
-            statusDiv.textContent = `1/2: 辞書ロード成功 (パス: ${dicPath} からロード完了)`;
-            console.log(`[Kuromoji] 成功: 辞書ファイルがロードされ、形態素解析器の構築が完了しました。`);
-            return tokenizer;
-
-        } catch (err) {
-            // 失敗
-            console.error(`[Kuromoji] 失敗 (${dicPath}): ファイルのダウンロードまたはビルドに失敗しました。`, err);
-            
-            if (i === DIC_PATHS.length - 1) {
-                const errorDetail = dicPath === './dict' 
-                    ? "ローカルサーバーの CORS設定または './dict' フォルダの配置ミスが考えられます。" 
-                    : "CDN接続エラーまたはファイルが見つかりません。";
-                
-                throw new Error(`Kuromoji辞書ファイルのロードにすべて失敗しました。原因の可能性: ${errorDetail}`);
-            }
-            // 次のパスを試行
-        }
-    }
-    // ここには到達しないはずだが、念のため
-    throw new Error("Kuromoji辞書パスの試行ロジック内で予期せぬエラーが発生しました。");
+if (typeof kuromoji === 'undefined') {
+throw new Error("kuromoji library is not loaded.");
 }
+return new Promise((resolve, reject) => {
+    kuromoji.builder({ dicPath: DICT_BASE_URL }).build(function(err, tokenizer) {
+        if (err) {
+            reject(err);
+        } else {
+            resolve(tokenizer);
+        }
+    });
+});
 
-/**
- * ダウンロード進捗とエラー処理を改善
- */
+}
 async function initializeWebLLM() {
-    console.log("--- 2/2 Web-LLMモデル初期化開始 ---");
-    statusDiv.textContent = "2/2: モデルファイルをダウンロード中...";
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+if (isIOS || isSafari) {
+    statusDiv.textContent = "警告: iOS/Safari環境はメモリ制限により動作が不安定になる可能性があります。";
+} else {
+    statusDiv.textContent = "モデルファイルをダウンロード中...";
+}
 
-    try {
-        const engine = await CreateMLCEngine(LLM_MODEL, { 
-            initProgressCallback: (info) => {
-                let statusMessage = "モデルの準備中...";
-                
-                // ダウンロード段階の表示
-                if (info.progress && info.total) {
-                    const percentage = Math.round((info.progress / info.total) * 100);
-                    statusMessage = `2/2: モデル(${LLM_MODEL})をダウンロード中... (${percentage}%)`;
-                    console.log(`[WebLLM] ダウンロード進捗: ${percentage}% (${info.text})`);
-                } 
-                // ダウンロード後の処理段階の表示 (WebAssemblyコンパイルなど)
-                else if (info.text) {
-                     statusMessage = `2/2: モデル構築中... (${info.text})`;
-                     console.log(`[WebLLM] 構築フェーズ: ${info.text}`);
-                }
-                
-                statusDiv.textContent = statusMessage;
+try {
+    const engine = await CreateMLCEngine(LLM_MODEL, { 
+        initProgressCallback: (info) => {
+            if (info.progress && info.total) {
+                const percentage = Math.round((info.progress / info.total) * 100);
+                statusDiv.textContent = `モデルロード中... ${percentage}% (${info.text})`;
+            } else if (info.text) {
+                 statusDiv.textContent = `エンジン準備中... ${info.text}`;
             }
-        });
-        console.log("[WebLLM] 成功: モデルのダウンロードとWebAssemblyコンパイルが完了しました。");
-        return engine;
-
-    } catch (e) {
-        // モデルファイルの404、メモリ不足、WebAssemblyコンパイルエラーなど
-        console.error("Web-LLM初期化エラー:", e);
-        const errorDetail = e.message.includes('404') ? "モデルファイルが見つかりません(404)。" : "WebAssemblyまたはメモリ割り当てエラーの可能性があります。";
-        
-        throw new Error(`Web-LLMのロードに失敗しました (${LLM_MODEL})。原因の可能性: ${errorDetail}`);
-    }
+        }
+    });
+    return engine;
+} catch (e) {
+    throw new Error(`Web-LLM init failed: ${e.message}`);
 }
 
+}
 async function init() {
-    try {
-        inputElement.disabled = true;
-        searchButton.disabled = true;
+try {
+inputElement.disabled = true;
+searchButton.disabled = true;
+    statusDiv.textContent = "辞書データをロード中...";
+    kuromojiTokenizer = await initializeKuromoji();
+    
+    statusDiv.textContent = "LLMエンジンを起動中...";
+    llmChatModule = await initializeWebLLM();
 
-        kuromojiTokenizer = await initializeKuromoji();
-        llmChatModule = await initializeWebLLM();
+    statusDiv.textContent = "準備完了";
+    inputElement.disabled = false;
+    searchButton.disabled = false;
 
-        statusDiv.textContent = "準備完了";
-        inputElement.disabled = false;
-        searchButton.disabled = false;
-        console.log("--- 初期化完了 ---");
+    appendMessage('ai', "システム準備完了。質問を入力してください。", true);
 
-        appendMessage('ai', "システム準備完了。質問を入力してください。", true);
-
-    } catch (e) {
-        console.error("--- 致命的な初期化エラー ---");
-        statusDiv.textContent = `初期化エラー: ${e.message}`;
-        console.error(e);
-        inputElement.disabled = true;
-        searchButton.disabled = true;
-        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n詳細: ${e.message}`, true);
-    }
+} catch (e) {
+    statusDiv.textContent = `エラー: ${e.message}`;
+    inputElement.disabled = true;
+    searchButton.disabled = true;
+    appendMessage('ai', `**初期化エラー**\n${e.message}`, true);
 }
 
-// --- 以下、変更なし ---
+}
 async function fetchWikipediaArticles(keyword) {
-    const apiUrl = 'https://ja.wikipedia.org/w/api.php';
-    const params = {
+const apiUrl = 'https://ja.wikipedia.org/w/api.php';
+const searchParams = {
+    action: 'query', format: 'json', origin: '*',
+    list: 'search',
+    srsearch: keyword,
+    srlimit: 4
+};
+
+try {
+    const searchRes = await fetch(apiUrl + '?' + new URLSearchParams(searchParams).toString());
+    const searchData = await searchRes.json();
+    
+    if (!searchData.query || !searchData.query.search || searchData.query.search.length === 0) {
+        return { success: false, text: "関連情報が見つかりませんでした。" };
+    }
+    
+    const pageIds = searchData.query.search.map(r => r.pageid).join('|');
+
+    const extractParams = {
         action: 'query', format: 'json', origin: '*',
-        list: 'search',
-        srsearch: keyword,
-        srlimit: 3,
-        srprop: 'snippet'
+        pageids: pageIds,
+        prop: 'extracts',
+        explaintext: true,
+        exintro: true,
+        redirects: 1
     };
-    const url = apiUrl + '?' + new URLSearchParams(params).toString();
 
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
+    const extractRes = await fetch(apiUrl + '?' + new URLSearchParams(extractParams).toString());
+    const extractData = await extractRes.json();
 
-        const searchResults = data.query.search;
-        if (!searchResults || searchResults.length === 0) {
-            return { success: false, text: "関連情報が見つかりませんでした。" };
+    let combinedText = "";
+    let sources = [];
+    const pages = extractData.query.pages;
+    
+    for (const pageId in pages) {
+        const article = pages[pageId];
+        if (article.extract) {
+            let cleanExtract = article.extract.replace(/\n{2,}/g, '\n').trim();
+            cleanExtract = cleanExtract.replace(/\.\.\.$/g, ''); 
+            
+            if (cleanExtract.length > 20) {
+                combinedText += `\n[記事: ${article.title}]\n${cleanExtract}\n`;
+                sources.push(article.title);
+            }
         }
+    }
 
-        let combinedText = "";
-        let sources = [];
+    if (combinedText.length === 0) {
+         return { success: false, text: "記事本文の取得に失敗しました。" };
+    }
+    
+    return { success: true, text: combinedText, sources: sources };
 
-        for (let i = 0; i < searchResults.length; i++) {
-            const article = searchResults[i];
-            let cleanSnippet = article.snippet.replace(/<span.*?>|<\/span>/g, '');
-            combinedText += `\n[記事${i + 1}: ${article.title}]\n${cleanSnippet}\n`;
-            sources.push(article.title);
+} catch (error) {
+    return { success: false, text: "Wikipedia APIエラー" };
+}
+
+}
+function prioritizeContext(context, userInput) {
+if (!kuromojiTokenizer) return context.substring(0, MAX_CONTEXT_TOKENS);
+const userTokens = kuromojiTokenizer.tokenize(userInput)
+    .filter(t => t.pos === '名詞' && t.basic_form !== '*').map(t => t.basic_form);
+
+const sentences = context.split('\n').filter(s => s.trim().length > 0);
+const scoredSentences = [];
+
+for (const sentence of sentences) {
+    const sentenceTokens = kuromojiTokenizer.tokenize(sentence)
+        .filter(t => t.pos === '名詞' && t.basic_form !== '*').map(t => t.basic_form);
+    
+    let score = 0;
+    for (const uToken of userTokens) {
+        if (sentenceTokens.includes(uToken)) {
+            score += 1;
         }
+    }
+    if (sentence.startsWith('[記事:')) {
+        score += 5;
+    }
 
-        return { success: true, text: combinedText, sources: sources };
-
-    } catch (error) {
-        return { success: false, text: "Wikipedia検索でエラーが発生しました。" };
+    if (score > 0 || sentence.startsWith('[記事:')) {
+        scoredSentences.push({ sentence, score });
     }
 }
 
+scoredSentences.sort((a, b) => b.score - a.score);
+
+let finalContext = "";
+
+for (const item of scoredSentences) {
+    if ((finalContext.length + item.sentence.length) < MAX_CONTEXT_TOKENS) {
+        finalContext += item.sentence + '\n';
+    } else {
+        break; 
+    }
+}
+
+return finalContext.trim();
+
+}
+function validateLLMResponse(response, context) {
+if (response.trim().length < 10) return response;
+const contextTokens = kuromojiTokenizer.tokenize(context)
+    .filter(t => t.pos === '名詞' && t.basic_form !== '*' && t.basic_form.length > 1)
+    .map(t => t.basic_form);
+
+const responseTokens = kuromojiTokenizer.tokenize(response)
+    .filter(t => t.pos === '名詞' && t.basic_form !== '*' && t.basic_form.length > 1)
+    .map(t => t.basic_form);
+
+const contextSet = new Set(contextTokens);
+let overlap = 0;
+
+for (const rToken of responseTokens) {
+    if (contextSet.has(rToken)) {
+        overlap++;
+    }
+}
+
+const totalResponseNouns = responseTokens.length;
+if (totalResponseNouns > 5 && (overlap / totalResponseNouns) < 0.15) {
+    return `[回答破棄] 生成された回答は参照情報に基づいていると確認できませんでした。\n(一致率: ${Math.round((overlap/totalResponseNouns)*100)}%)`;
+}
+
+return response;
+
+}
 function buildFullPrompt(context, userInput) {
-    const historyText = chatHistory.map(msg => 
-        `[ ${msg.sender === 'user' ? 'ユーザー' : 'AI'} ] ${msg.text}`
-    ).join('\n');
+let historyText = "";
+for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const msg = chatHistory[i];
+    const role = msg.role === 'user' ? 'ユーザー' : 'AI';
+    const line = `[ ${role} ] ${msg.content}\n`;
 
-    const recentHistory = historyText.split('\n').slice(-5).join('\n');
+    if ((historyText.length + line.length) < HISTORY_CHAR_LIMIT) {
+        historyText = line + historyText;
+    } else {
+        break;
+    }
+}
 
-    const systemPrompt = SYSTEM_PROMPT.replace('[USERNAME]', userName || 'ユーザー');
+const systemPrompt = SYSTEM_PROMPT.replace('[USERNAME]', userName || 'ユーザー');
 
-    return `
+return `
+
 ${systemPrompt}
-
-[過去の会話履歴（直近の5ターン）]
-${recentHistory}
-
+[過去の会話履歴]
+${historyText || "なし"}
 [参照情報]
 ${context}
-
 [質問]
 ${userInput}
-
 [回答]
 `;
 }
+async function generateLLMResponse(prompt, contextForValidation) {
+let aiResponse = "";
+const aiMessageElement = appendMessage('ai', '...');
+const bubbleElement = aiMessageElement.querySelector('.bubble');
+try {
+    const completion = await llmChatModule.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        stream: true,
+        ...LLM_CONFIG
+    });
 
-async function generateLLMResponse(prompt) {
-    let aiResponse = "";
-    const aiMessageElement = appendMessage('ai', '...');
-    const bubbleElement = aiMessageElement.querySelector('.bubble');
-
-    const callback = (step, message) => {
-        aiResponse += message;
-        bubbleElement.textContent = aiResponse;
-        chatWindow.scrollTop = chatWindow.scrollHeight;
-    };
-
-    try {
-        await llmChatModule.generate(prompt, callback);
-        chatHistory.push({ sender: 'ai', text: aiResponse });
-    } catch (error) {
-        bubbleElement.textContent += ` (エラー: ${error.message})`;
+    for await (const chunk of completion) {
+        const delta = chunk.choices[0].delta.content;
+        if (delta) {
+            aiResponse += delta;
+            bubbleElement.textContent = aiResponse;
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
     }
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-}
 
+    const finalValidated = validateLLMResponse(aiResponse, contextForValidation);
+    if (finalValidated !== aiResponse) {
+        bubbleElement.innerHTML = `<span style="color:red;">${finalValidated}</span>`;
+        chatHistory.push({ role: 'assistant', content: "[回答破棄]" });
+    } else {
+        chatHistory.push({ role: 'assistant', content: aiResponse });
+    }
+
+} catch (error) {
+    bubbleElement.textContent += ` (GenError: ${error.message})`;
+}
+chatWindow.scrollTop = chatWindow.scrollHeight;
+
+}
 async function processUserInput() {
-    const userInput = inputElement.value.trim();
-    if (!userInput || !llmChatModule || !kuromojiTokenizer) return;
+const userInput = inputElement.value.trim();
+if (!userInput || !llmChatModule || !kuromojiTokenizer) return;
+appendMessage('user', userInput);
+chatHistory.push({ role: 'user', content: userInput });
 
-    appendMessage('user', userInput);
-    chatHistory.push({ sender: 'user', text: userInput });
+inputElement.value = ''; 
+searchButton.disabled = true;
 
-    inputElement.value = ''; 
-    searchButton.disabled = true;
+const tokens = kuromojiTokenizer.tokenize(userInput);
+const searchKeywords = Array.from(new Set(tokens
+    .filter(t => t.pos === '名詞' && t.basic_form !== '*')
+    .map(t => t.basic_form)
+)).slice(0, 4).join(' ');
 
-    const tokens = kuromojiTokenizer.tokenize(userInput);
-    const searchKeywords = Array.from(new Set(tokens
-        .filter(t => t.pos === '名詞' && t.basic_form !== '*')
-        .map(t => t.basic_form)
-    )).slice(0, 5).join(' ');
+const searchQuery = searchKeywords || userInput;
 
-    const searchQuery = searchKeywords || userInput;
+appendMessage('ai', `検索中: ${searchQuery}`);
 
-    appendMessage('ai', `Wikipediaで「${searchQuery}」の関連情報を検索中...`);
+const wikiResult = await fetchWikipediaArticles(searchQuery);
 
-    const wikiResult = await fetchWikipediaArticles(searchQuery);
-
-    if (!wikiResult.success) {
-        const failureMessage = wikiResult.text;
-        appendMessage('ai', failureMessage);
-        chatHistory.push({ sender: 'ai', text: failureMessage });
-        searchButton.disabled = false;
-        return;
-    }
-
-    const context = wikiResult.text.substring(0, MAX_CONTEXT_LENGTH);
-
-    appendMessage('ai', `参照 ${wikiResult.sources.length} 件を取得しました。回答を生成します。`);
-
-    const fullPrompt = buildFullPrompt(context, userInput);
-
-    await generateLLMResponse(fullPrompt);
-
-    const sourceMessage = `<small>参照元: ${wikiResult.sources.join(', ')}</small>`;
-    appendMessage('ai', sourceMessage, true);
-
+if (!wikiResult.success) {
+    appendMessage('ai', wikiResult.text);
+    chatHistory.push({ role: 'assistant', content: wikiResult.text });
     searchButton.disabled = false;
+    return;
 }
 
+const context = prioritizeContext(wikiResult.text, userInput);
+
+if (context.length === 0) {
+    appendMessage('ai', "有効なコンテキストが抽出できませんでした。");
+    searchButton.disabled = false;
+    return;
+}
+
+const fullPrompt = buildFullPrompt(context, userInput);
+await generateLLMResponse(fullPrompt, context);
+
+const sourceMessage = `<small>Sources: ${wikiResult.sources.join(', ')}</small>`;
+appendMessage('ai', sourceMessage, true);
+
+searchButton.disabled = false;
+
+}
 function handleLogin() {
-    const inputName = usernameInput.value.trim();
-    if (!inputName) {
-        alert("ユーザー名を入力してください。");
-        return;
-    }
-    userName = inputName;
-
-    loginArea.style.display = 'none';
-    appContent.style.display = 'block';
-    chatWindow.innerHTML = ''; 
-
-    appendMessage('ai', `${userName}さん、こんにちは！チャットシステムを起動します。\nモデルとリソースの読み込みを開始します。`);
-
-    init();
+const inputName = usernameInput.value.trim();
+if (!inputName) {
+alert("Enter Name");
+return;
 }
+userName = inputName;
+loginArea.style.display = 'none';
+appContent.style.display = 'block';
+chatWindow.innerHTML = ''; 
 
+init();
+
+}
 loginButton.addEventListener('click', handleLogin);
 usernameInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        handleLogin();
-    }
+if (e.key === 'Enter') handleLogin();
 });
 searchButton.addEventListener('click', processUserInput);
 inputElement.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !searchButton.disabled) {
-        processUserInput();
-    }
+if (e.key === 'Enter' && !searchButton.disabled) processUserInput();
 });
