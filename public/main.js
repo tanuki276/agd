@@ -21,7 +21,7 @@ function appendMessage(sender, text, html = false) {
 function initializeKuromoji() {
     return new Promise((resolve, reject) => {
         statusDiv.textContent = "1/2: Kuromoji辞書ファイルをロード中...";
-        kuromoji.builder({ dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict" }).build(function(err, t) {
+        kuromoji.builder({ dicPath: "./dict" }).build(function(err, t) {
             if (err) reject(err);
             else resolve(t);
         });
@@ -49,7 +49,7 @@ async function fetchWikipediaArticles(keyword) {
     try {
         const response = await fetch(url);
         const data = await response.json();
-        
+
         const searchResults = data.query.search;
         if (!searchResults || searchResults.length === 0) {
             return { success: false, text: "関連情報が見つかりませんでした。" };
@@ -57,7 +57,7 @@ async function fetchWikipediaArticles(keyword) {
 
         let combinedText = "";
         let sources = [];
-        
+
         for (let i = 0; i < searchResults.length; i++) {
             const article = searchResults[i];
             let cleanSnippet = article.snippet.replace(/<span.*?>|<\/span>/g, '');
@@ -100,19 +100,19 @@ async function processUserInput() {
     appendMessage('user', userInput);
     inputElement.value = ''; 
     searchButton.disabled = true;
-    
+
     appendMessage('ai', "Wikipediaで関連情報を検索中...");
-    
+
     const wikiResult = await fetchWikipediaArticles(userInput);
-    
+
     if (!wikiResult.success) {
         appendMessage('ai', wikiResult.text);
         searchButton.disabled = false;
         return;
     }
-    
+
     const context = wikiResult.text.substring(0, MAX_CONTEXT_LENGTH);
-    
+
     const tokens = kuromojiTokenizer.tokenize(userInput);
     const importantKeywords = Array.from(new Set(tokens
         .filter(t => (t.pos === '名詞' || t.pos === '動詞') && t.basic_form !== '*')
@@ -147,11 +147,11 @@ async function init() {
     try {
         kuromojiTokenizer = await initializeKuromoji();
         llmChatModule = await initializeWebLLM();
-        
+
         statusDiv.textContent = "準備完了";
         inputElement.disabled = false;
         searchButton.disabled = false;
-        
+
         appendMessage('ai', "システム準備完了。質問を入力してください。", true);
 
     } catch (e) {
