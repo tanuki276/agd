@@ -1,4 +1,4 @@
-import { ChatModule } from '@mlc-ai/web-llm';
+import * as webllm from '@mlc-ai/web-llm';
 import * as kuromoji from 'kuromoji'; 
 
 const inputElement = document.getElementById('keyword-input');
@@ -21,7 +21,7 @@ function appendMessage(sender, text, html = false) {
 
 function initializeKuromoji() {
     return new Promise((resolve, reject) => {
-        statusDiv.textContent = "1/2: Kuromoji辞書ファイルをロード中...";
+        statusDiv.textContent = "1/2: ファイルをロード中...";
 
         kuromoji.builder({ dicPath: "./dict" }).build(function(err, t) {
             if (err) reject(err);
@@ -31,8 +31,8 @@ function initializeKuromoji() {
 }
 
 async function initializeWebLLM() {
-    statusDiv.textContent = "2/2: Web LLMモデルをロード中... (初回は数分かかります)";
-    const chat = new ChatModule();
+    statusDiv.textContent = "2/2: モデルをロード中...";
+    const chat = new webllm.ChatModule();
     await chat.reload(LLM_MODEL);
     return chat;
 }
