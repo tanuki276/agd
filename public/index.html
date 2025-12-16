@@ -1,71 +1,82 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>旧日本語変換</title>
-  <style>
-    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#f59e0b}
-    body{font-family: "Noto Sans JP", system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; background:linear-gradient(180deg,#071021 0%, #071827 100%); color:#e6eef6; margin:0; padding:18px}
-    h1{font-size:20px;margin:0 0 8px}
-    .wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:14px;border-radius:10px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
-    textarea{width:100%;height:320px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:inherit;padding:10px;border-radius:6px;font-size:15px;resize:vertical}
-    .controls{display:flex;gap:8px;align-items:center;margin-top:10px}
-    button{background:var(--accent);border:none;color:#071021;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
-    .muted{color:var(--muted);font-size:13px}
-    .small{font-size:13px}
-    .dict-list{max-height:220px;overflow:auto;border:1px dashed rgba(255,255,255,0.04);padding:8px;border-radius:6px;background:rgba(255,255,255,0.01)}
-    .pair{display:flex;gap:8px;margin-bottom:6px;align-items:center}
-    .pair input[type=text]{flex:1;background:transparent;border:1px solid rgba(255,255,255,0.04);padding:6px;border-radius:6px;color:inherit}
-    .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:6px;border-radius:6px;cursor:pointer}
-    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-    .options{display:flex;gap:8px;align-items:center}
-    .notice{font-size:13px;color:#ffdca9;background:linear-gradient(90deg,rgba(255,255,255,0.02),transparent);padding:8px;border-radius:6px;margin-top:10px}
-    .footer{margin-top:12px;color:var(--muted);font-size:13px}
-    @media (max-width: 768px) {
-        .wrap { grid-template-columns: 1fr; }
-    }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+    <meta charset="UTF-8">
+    <title>rai</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        h1 { text-align: center; color: #333; }
+        #loading-status { color: orange; margin-bottom: 10px; text-align: center; font-weight: bold; }
+
+        #chat-window { 
+            height: 400px; 
+            border: 1px solid #ccc; 
+            overflow-y: scroll; 
+            padding: 15px; 
+            margin-bottom: 10px; 
+            background-color: #f7f7f7; 
+            border-radius: 8px;
+        }
+
+        .message { margin-bottom: 15px; display: flex; }
+        
+        .user { justify-content: flex-end; }
+        .user .bubble { background-color: #dcf8c6; margin-left: auto; color: #1f2d3d; }
+        
+        .ai { justify-content: flex-start; }
+        .ai .bubble { background-color: #fff; margin-right: auto; border: 1px solid #eee; color: #333; }
+        
+        .bubble { 
+            max-width: 80%; 
+            padding: 10px 12px; 
+            border-radius: 18px; 
+            box-shadow: 0 1px 1px rgba(0,0,0,0.08); 
+            line-height: 1.5;
+        }
+
+        .input-area { display: flex; }
+        #keyword-input { 
+            flex-grow: 1; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px 0 0 5px; 
+            font-size: 16px;
+        }
+        #search-button { 
+            padding: 10px 15px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 0 5px 5px 0; 
+            cursor: pointer; 
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        #search-button:disabled {
+            background-color: #b0c4de;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
 <body>
-  <div class="topbar">
-    <div>
-      <h1>旧日本語変換</h1>
-      <div class="muted">形態素解析とローカル辞書で“本気”変換</div>
+    <h1>Wikipedia RAG チャットボット</h1>
+    <div id="loading-status">システムを初期化中...</div>
+    
+    <div id="chat-window">
+        <div class="message ai">
+            <div class="bubble">
+                準備が完了するまで、しばらくお待ちください。
+            </div>
+        </div>
     </div>
-    <div class="options">
-      <span class="small muted">自動変換:</span>
-      <label><input type="checkbox" id="opt-kanji" checked> 旧字体</label>
-      <label><input type="checkbox" id="opt-kana" checked> 旧仮名遣</label>
-      <label><input type="checkbox" id="opt-grammar" checked> 文体変換</label>
+    
+    <div class="input-area">
+        <input type="text" id="keyword-input" placeholder="質問を入力してください" disabled>
+        <button id="search-button" disabled>送信</button>
     </div>
-  </div>
-  <div class="wrap">
-    <div class="card">
-      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <strong>入力（現代文）</strong>
-        <div class="muted">テキストを入れて変換ボタンを押す</div>
-      </div>
-      <textarea id="input" placeholder="ここに現代日本語を入力"></textarea>
-      <div class="controls">
-        <button id="convert" disabled>変換 ▶</button>
-        <button id="swap" class="icon-btn">入替</button>
-        <button id="clear" class="icon-btn">クリア</button>
-        <button id="load-sample" class="icon-btn">サンプル読込</button>
-        <div style="flex:1"></div>
-      </div>
-      <div class="notice" id="status-message">準備中...</div>
-    </div>
-    <div class="card">
-      <strong>出力（旧日本語）</strong>
-      <textarea id="output" readonly placeholder="変換結果がここに表示されます"></textarea>
-      <div class="notice" style="margin-top:12px;">
-        ※ 辞書は`./data/`フォルダから、形態素解析辞書は`/dict/`フォルダから自動で読み込まれます。
-      </div>
-    </div>
-  </div>
-  <script src="./main.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+    
+    <script type="module" src="./main.js"></script>
 </body>
 </html>
