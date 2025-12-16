@@ -20,8 +20,9 @@ function appendMessage(sender, text, html = false) {
 
 function initializeKuromoji() {
     return new Promise((resolve, reject) => {
-        statusDiv.textContent = "1/2: Kuromoji辞書ファイルをロード中...";
-        kuromoji.builder({ dicPath: "./dict" }).build(function(err, t) {
+        statusDiv.textContent = "1/2: リソースをロード中...";
+        
+        kuromoji.builder({ dicPath: "../dict" }).build(function(err, t) {
             if (err) reject(err);
             else resolve(t);
         });
@@ -29,7 +30,7 @@ function initializeKuromoji() {
 }
 
 async function initializeWebLLM() {
-    statusDiv.textContent = "2/2: Web LLMモデルをロード中... (初回は数分かかります)";
+    statusDiv.textContent = "2/2: LLMモデルをロード中...";
     const chat = new ChatModule();
     await chat.reload(LLM_MODEL);
     return chat;
