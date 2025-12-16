@@ -41,14 +41,20 @@ function appendMessage(sender, text, html = false) {
     return messageDiv;
 }
 
+/**
+ * ステータス表示とエラーログを改善
+ */
 async function initializeKuromoji() {
+    console.log("--- 1/2 Kuromoji辞書初期化開始 ---");
+
     if (typeof kuromoji === 'undefined') {
-        throw new Error("kuromojiライブラリがロードされていません。index.htmlの<script>タグを確認してください。");
+        throw new Error("kuromojiライブラリ本体がロードされていません。index.htmlを確認してください。");
     }
 
     for (let i = 0; i < DIC_PATHS.length; i++) {
         const dicPath = DIC_PATHS[i];
-        statusDiv.textContent = `1/2: 辞書ファイルをロード中... (${i + 1}回目: ${dicPath})`;
+        statusDiv.textContent = `1/2: 辞書ファイルをロード中... (試行${i + 1}/${DIC_PATHS.length}: ${dicPath})`;
+        console.log(`[Kuromoji] 試行開始: ${dicPath}`);
 
         try {
             const tokenizer = await new Promise((resolve, reject) => {
@@ -57,35 +63,66 @@ async function initializeKuromoji() {
                     else resolve(t);
                 });
             });
-            statusDiv.textContent = `1/2: 辞書ロード成功 (${dicPath})`;
+            
+            // 成功
+            statusDiv.textContent = `1/2: 辞書ロード成功 (パス: ${dicPath} からロード完了)`;
+            console.log(`[Kuromoji] 成功: 辞書ファイルがロードされ、形態素解析器の構築が完了しました。`);
             return tokenizer;
 
         } catch (err) {
-            console.warn(`Kuromoji辞書ロード失敗 (${dicPath}): `, err);
+            // 失敗
+            console.error(`[Kuromoji] 失敗 (${dicPath}): ファイルのダウンロードまたはビルドに失敗しました。`, err);
+            
             if (i === DIC_PATHS.length - 1) {
-                throw new Error("Kuromoji辞書ファイルのロードに失敗しました。CDNまたはローカルの './dict' の配置を確認してください。");
+                const errorDetail = dicPath === './dict' 
+                    ? "ローカルサーバーの CORS設定または './dict' フォルダの配置ミスが考えられます。" 
+                    : "CDN接続エラーまたはファイルが見つかりません。";
+                
+                throw new Error(`Kuromoji辞書ファイルのロードにすべて失敗しました。原因の可能性: ${errorDetail}`);
             }
+            // 次のパスを試行
         }
     }
-    throw new Error("すべてのKuromoji辞書パスの試行が失敗しました。");
+    // ここには到達しないはずだが、念のため
+    throw new Error("Kuromoji辞書パスの試行ロジック内で予期せぬエラーが発生しました。");
 }
 
+/**
+ * ダウンロード進捗とエラー処理を改善
+ */
 async function initializeWebLLM() {
-    statusDiv.textContent = "2/2: モデルをロード中...";
+    console.log("--- 2/2 Web-LLMモデル初期化開始 ---");
+    statusDiv.textContent = "2/2: モデルファイルをダウンロード中...";
 
     try {
         const engine = await CreateMLCEngine(LLM_MODEL, { 
             initProgressCallback: (info) => {
+                let statusMessage = "モデルの準備中...";
+                
+                // ダウンロード段階の表示
                 if (info.progress && info.total) {
                     const percentage = Math.round((info.progress / info.total) * 100);
-                    statusDiv.textContent = `2/2: モデルをロード中... (${percentage}%)`;
+                    statusMessage = `2/2: モデル(${LLM_MODEL})をダウンロード中... (${percentage}%)`;
+                    console.log(`[WebLLM] ダウンロード進捗: ${percentage}% (${info.text})`);
+                } 
+                // ダウンロード後の処理段階の表示 (WebAssemblyコンパイルなど)
+                else if (info.text) {
+                     statusMessage = `2/2: モデル構築中... (${info.text})`;
+                     console.log(`[WebLLM] 構築フェーズ: ${info.text}`);
                 }
+                
+                statusDiv.textContent = statusMessage;
             }
         });
+        console.log("[WebLLM] 成功: モデルのダウンロードとWebAssemblyコンパイルが完了しました。");
         return engine;
+
     } catch (e) {
+        // モデルファイルの404、メモリ不足、WebAssemblyコンパイルエラーなど
         console.error("Web-LLM初期化エラー:", e);
-        throw new Error(`Web-LLMのロードに失敗しました: ${e.message}`);
+        const errorDetail = e.message.includes('404') ? "モデルファイルが見つかりません(404)。" : "WebAssemblyまたはメモリ割り当てエラーの可能性があります。";
+        
+        throw new Error(`Web-LLMのロードに失敗しました (${LLM_MODEL})。原因の可能性: ${errorDetail}`);
     }
 }
 
@@ -100,18 +137,21 @@ async function init() {
         statusDiv.textContent = "準備完了";
         inputElement.disabled = false;
         searchButton.disabled = false;
+        console.log("--- 初期化完了 ---");
 
         appendMessage('ai', "システム準備完了。質問を入力してください。", true);
 
     } catch (e) {
+        console.error("--- 致命的な初期化エラー ---");
         statusDiv.textContent = `初期化エラー: ${e.message}`;
         console.error(e);
         inputElement.disabled = true;
         searchButton.disabled = true;
-        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n(${e.message})`, true);
+        appendMessage('ai', `**初期化エラーが発生しました。**\nシステムが利用できません。エラーログを確認してください。\n詳細: ${e.message}`, true);
     }
 }
 
+// --- 以下、変更なし ---
 async function fetchWikipediaArticles(keyword) {
     const apiUrl = 'https://ja.wikipedia.org/w/api.php';
     const params = {
@@ -200,7 +240,7 @@ async function processUserInput() {
 
     appendMessage('user', userInput);
     chatHistory.push({ sender: 'user', text: userInput });
-    
+
     inputElement.value = ''; 
     searchButton.disabled = true;
 
@@ -211,7 +251,7 @@ async function processUserInput() {
     )).slice(0, 5).join(' ');
 
     const searchQuery = searchKeywords || userInput;
-    
+
     appendMessage('ai', `Wikipediaで「${searchQuery}」の関連情報を検索中...`);
 
     const wikiResult = await fetchWikipediaArticles(searchQuery);
@@ -226,12 +266,12 @@ async function processUserInput() {
 
     const context = wikiResult.text.substring(0, MAX_CONTEXT_LENGTH);
 
-    appendMessage('ai', `参照記事 ${wikiResult.sources.length} 件を取得しました。回答を生成します。`);
+    appendMessage('ai', `参照 ${wikiResult.sources.length} 件を取得しました。回答を生成します。`);
 
     const fullPrompt = buildFullPrompt(context, userInput);
 
     await generateLLMResponse(fullPrompt);
-    
+
     const sourceMessage = `<small>参照元: ${wikiResult.sources.join(', ')}</small>`;
     appendMessage('ai', sourceMessage, true);
 
@@ -245,12 +285,12 @@ function handleLogin() {
         return;
     }
     userName = inputName;
-    
+
     loginArea.style.display = 'none';
     appContent.style.display = 'block';
     chatWindow.innerHTML = ''; 
-    
-    appendMessage('ai', `**${userName}**さん、こんにちは！RAGチャットシステムを起動します。\nモデルと辞書の読み込みを開始します。`);
+
+    appendMessage('ai', `${userName}さん、こんにちは！チャットシステムを起動します。\nモデルとリソースの読み込みを開始します。`);
 
     init();
 }
