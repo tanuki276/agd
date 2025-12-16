@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.61",
-    "kuromoji": "^0.1.2"
+    "kuromoji": "^0.1.2",
+    "path-browserify": "^1.0.1"
   },
   "devDependencies": {
     "vite": "^5.0.11"
