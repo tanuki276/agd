@@ -1,4 +1,4 @@
-import * as webllm from '@mlc-ai/web-llm';
+import { CreateMLCEngine } from '@mlc-ai/web-llm';
 import * as kuromoji from 'kuromoji'; 
 
 const inputElement = document.getElementById('keyword-input');
@@ -32,9 +32,10 @@ function initializeKuromoji() {
 
 async function initializeWebLLM() {
     statusDiv.textContent = "2/2: モデルをロード中...";
-    const chat = new webllm.ChatModule();
-    await chat.reload(LLM_MODEL);
-    return chat;
+    
+    const engine = await CreateMLCEngine(LLM_MODEL);
+    
+    return engine; 
 }
 
 async function fetchWikipediaArticles(keyword) {
@@ -89,6 +90,7 @@ async function generateLLMResponse(prompt) {
     };
 
     try {
+        // llmChatModule（= engine）の generate メソッドを呼び出す
         await llmChatModule.generate(prompt, callback);
     } catch (error) {
         aiMessageElement.querySelector('.bubble').textContent += ` (Error: ${error.message})`;
