@@ -1,4 +1,5 @@
 import { ChatModule } from '@mlc-ai/web-llm';
+import * as kuromoji from 'kuromoji'; 
 
 const inputElement = document.getElementById('keyword-input');
 const searchButton = document.getElementById('search-button');
