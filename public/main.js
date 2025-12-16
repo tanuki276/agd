@@ -1,4 +1,4 @@
-import * as webllm from '@mlc-ai/web-llm';
+import { ChatModule } from '@mlc-ai/web-llm';
 import * as kuromoji from 'kuromoji'; 
 
 const inputElement = document.getElementById('keyword-input');
@@ -32,7 +32,7 @@ function initializeKuromoji() {
 
 async function initializeWebLLM() {
     statusDiv.textContent = "2/2: モデルをロード中...";
-    const chat = new webllm.ChatModule();
+    const chat = new ChatModule();
     await chat.reload(LLM_MODEL);
     return chat;
 }
