@@ -2,11 +2,37 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>rai</title>
+    <title>RAGチャットボット</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
         h1 { text-align: center; color: #333; }
         #loading-status { color: orange; margin-bottom: 10px; text-align: center; font-weight: bold; }
+
+        #login-area { 
+            display: flex; 
+            margin-bottom: 20px; 
+            padding: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            background: #e9f7ef; 
+        }
+        #username-input { 
+            flex-grow: 1; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px 0 0 5px; 
+            font-size: 16px;
+        }
+        #login-button {
+            padding: 10px 15px; 
+            background-color: #28a745; 
+            color: white; 
+            border: none; 
+            border-radius: 0 5px 5px 0; 
+            cursor: pointer; 
+            font-size: 16px;
+        }
+        .app-content { display: none; } 
 
         #chat-window { 
             height: 400px; 
@@ -33,6 +59,14 @@
             box-shadow: 0 1px 1px rgba(0,0,0,0.08); 
             line-height: 1.5;
         }
+        .ai .bubble small { 
+            display: block; 
+            margin-top: 5px; 
+            color: #6c757d; 
+            border-top: 1px dashed #e9ecef;
+            padding-top: 5px;
+            font-size: 0.75rem; 
+        }
 
         .input-area { display: flex; }
         #keyword-input { 
@@ -57,26 +91,32 @@
             cursor: not-allowed;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
 </head>
 <body>
-    <h1>チャットボット</h1>
+    <h1>RAGチャットボット</h1>
     <div id="loading-status">システムを初期化中...</div>
 
-    <div id="chat-window">
-        <div class="message ai">
-            <div class="bubble">
-                準備が完了するまで、しばらくお待ちください。
+    <div id="login-area">
+        <input type="text" id="username-input" placeholder="あなたの名前を入力してください">
+        <button id="login-button">チャット開始</button>
+    </div>
+
+    <div class="app-content">
+        <div id="chat-window">
+            <div class="message ai">
+                <div class="bubble">
+                    ログインし、システムがロードされるまでお待ちください。
+                </div>
             </div>
+        </div>
+    
+        <div class="input-area">
+            <input type="text" id="keyword-input" placeholder="質問を入力してください" disabled>
+            <button id="search-button" disabled>送信</button>
         </div>
     </div>
 
-    <div class="input-area">
-        <input type="text" id="keyword-input" placeholder="質問を入力してください" disabled>
-        <button id="search-button" disabled>送信</button>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
-
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>
