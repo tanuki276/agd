@@ -10,14 +10,14 @@ const loginButton = document.getElementById('login-button');
 const appContent = document.querySelector('.app-content');
 const progressBar = document.getElementById('progress-bar');
 const modelSelect = document.getElementById('model-select');
-const personalitySelect = document.getElementById('personality-select');
+const personalityInput = document.getElementById('personality-input');
 
 let kuromojiTokenizer = null;
 let llmChatModule = null; 
 let userName = null;
 let currentLLMModel = modelSelect ? modelSelect.value : "Phi-2-v2-q4f16_1";
 let isColabMode = false;
-let colabApiUrl = "https://YOUR-COLAB-NGROK-URL/generate"; 
+let colabApiUrl = "ここ"; 
 
 const chatHistory = [];
 const MAX_CONTEXT_TOKENS = 2500;
@@ -31,14 +31,13 @@ const LLM_CONFIG = {
 
 const DICT_BASE_URL = 'https://tanuki276.github.io/agd/dict/';
 
-const PERSONALITY_PROMPTS = {
-    friendly: "あなたは、親しみやすく丁寧な言葉遣いをするAIアシスタントです。",
-    professional: "あなたは、プロフェッショナルで簡潔な言葉遣いをするAIアシスタントです。回答は要点を絞り、専門的なトーンを維持してください。",
-    casual: "あなたは、カジュアルでフランクな言葉遣いをするAIアシスタントです。敬語は控えめに、友達と話すようなトーンで回答してください。"
-};
-
-const SYSTEM_PROMPT_TEMPLATE = (personality) => `
-${PERSONALITY_PROMPTS[personality]}
+// 性格設定のプロンプトを、Inputの値を直接使うように変更
+const SYSTEM_PROMPT_TEMPLATE = (customPersonality) => {
+    const defaultPersonality = "親しみやすく丁寧な言葉遣いをするAIアシスタントです。";
+    const personality = customPersonality && customPersonality.trim() !== "" ? customPersonality : defaultPersonality;
+    
+    return `
+あなたは、${personality}
 ユーザー名: [USERNAME]
 以下の[参照情報]が提供されている場合、その内容を回答の主要な根拠としてください。
 [重要制約]
@@ -46,6 +45,7 @@ ${PERSONALITY_PROMPTS[personality]}
  * [参照情報]の内容を最優先しつつ、自然な会話として成立させるために、一般的な知識や文脈を補完して回答しても構いません。
  * 回答は自然な日本語の文章で構成し、記事番号などのメタ情報を含めないでください。
 `;
+};
 
 function appendMessage(sender, text, html = false) {
     const messageDiv = document.createElement('div');
@@ -113,7 +113,7 @@ async function init() {
         inputElement.disabled = true;
         searchButton.disabled = true;
         if (modelSelect) modelSelect.disabled = true;
-        if (personalitySelect) personalitySelect.disabled = true;
+        if (personalityInput) personalityInput.disabled = true;
 
         statusDiv.textContent = "辞書データをロード中...";
         if (!kuromojiTokenizer) {
@@ -123,9 +123,9 @@ async function init() {
         isColabMode = (currentLLMModel === 'colab-api');
 
         if (isColabMode) {
-            if (colabApiUrl.includes('ここ')) {
+            if (colabApiUrl.includes('YOUR-COLAB-NGROK-URL')) {
                  statusDiv.textContent = "エラー: Colab API URLが設定されていません。";
-                 appendMessage('ai', `初期化エラー\nファイル内の \`colabApiUrl\` を有効なURLに設定してください。`, true);
+                 appendMessage('ai', `**初期化エラー**\n運営者様へ: JSファイル内の \`colabApiUrl\` を有効なURLに設定してください。`, true);
                  throw new Error("Colab API URL not configured.");
             }
             statusDiv.textContent = `Colab APIモード (URL: ${colabApiUrl.substring(8, 20)}...) : 準備完了`;
@@ -142,18 +142,18 @@ async function init() {
         inputElement.disabled = false;
         searchButton.disabled = false;
         if (modelSelect) modelSelect.disabled = false;
-        if (personalitySelect) personalitySelect.disabled = false;
+        if (personalityInput) personalityInput.disabled = false;
 
     } catch (e) {
         statusDiv.textContent = `エラー: ${e.message}`;
         inputElement.disabled = true;
         searchButton.disabled = true;
         if (modelSelect) modelSelect.disabled = true;
-        if (personalitySelect) personalitySelect.disabled = true;
-        appendMessage('ai', `初期化エラー\n${e.message}`, true);
+        if (personalityInput) personalityInput.disabled = true;
+        appendMessage('ai', `**初期化エラー**\n${e.message}`, true);
         
         if (modelSelect) modelSelect.disabled = false;
-        if (personalitySelect) personalitySelect.disabled = false;
+        if (personalityInput) personalityInput.disabled = false;
     }
 }
 
@@ -282,8 +282,9 @@ function buildFullPrompt(context, userInput) {
         }
     }
 
-    const selectedPersonality = personalitySelect ? personalitySelect.value : 'friendly';
-    const systemPrompt = SYSTEM_PROMPT_TEMPLATE(selectedPersonality).replace('[USERNAME]', userName || 'ユーザー');
+    // Inputの値を取得
+    const customPersonality = personalityInput ? personalityInput.value : '';
+    const systemPrompt = SYSTEM_PROMPT_TEMPLATE(customPersonality).replace('[USERNAME]', userName || 'ユーザー');
     
     return `
 ${systemPrompt}
@@ -446,11 +447,7 @@ function handleLogin() {
         currentLLMModel = modelSelect.value;
     }
     
-    if (personalitySelect) {
-        personalitySelect.addEventListener('change', () => {
-            appendMessage('ai', `AIの性格を **${personalitySelect.options[personalitySelect.selectedIndex].textContent}** に変更しました。`, true);
-        });
-    }
+    // 性格設定はInputフィールドになったため、ここでは初期化に関する処理は不要
 
     init();
 }
