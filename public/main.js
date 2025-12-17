@@ -1,4 +1,4 @@
-import { CreateMLCEngine } from '@mlc-ai/web-llm';
+Import { CreateMLCEngine } from '@mlc-ai/web-llm';
 
 const inputElement = document.getElementById('keyword-input');
 const searchButton = document.getElementById('search-button');
@@ -10,11 +10,14 @@ const loginButton = document.getElementById('login-button');
 const appContent = document.querySelector('.app-content');
 const progressBar = document.getElementById('progress-bar');
 const modelSelect = document.getElementById('model-select');
+const personalitySelect = document.getElementById('personality-select');
 
 let kuromojiTokenizer = null;
-let llmChatModule = null;
+let llmChatModule = null; 
 let userName = null;
 let currentLLMModel = modelSelect ? modelSelect.value : "Phi-2-v2-q4f16_1";
+let isColabMode = false;
+let colabApiUrl = "https://YOUR-COLAB-NGROK-URL/generate"; 
 
 const chatHistory = [];
 const MAX_CONTEXT_TOKENS = 2500;
@@ -28,15 +31,20 @@ const LLM_CONFIG = {
 
 const DICT_BASE_URL = 'https://tanuki276.github.io/agd/dict/';
 
-const SYSTEM_PROMPT = `
-あなたは、親しみやすく丁寧な言葉遣いをするAIアシスタントです。
+const PERSONALITY_PROMPTS = {
+    friendly: "あなたは、親しみやすく丁寧な言葉遣いをするAIアシスタントです。",
+    professional: "あなたは、プロフェッショナルで簡潔な言葉遣いをするAIアシスタントです。回答は要点を絞り、専門的なトーンを維持してください。",
+    casual: "あなたは、カジュアルでフランクな言葉遣いをするAIアシスタントです。敬語は控えめに、友達と話すようなトーンで回答してください。"
+};
+
+const SYSTEM_PROMPT_TEMPLATE = (personality) => `
+${PERSONALITY_PROMPTS[personality]}
 ユーザー名: [USERNAME]
-以下の[参照情報]に書かれていることのみを使い、質問に回答してください。
-回答は必ず[参照情報]に含まれる固有名詞やキーワードを複数回使用し、根拠を明確にしてください。
+以下の[参照情報]が提供されている場合、その内容を回答の主要な根拠としてください。
 [重要制約]
- * [参照情報]に書かれていない、外部の知識や推測は一切回答に含めないでください。
- * 情報が不足している場合は正直に「提供された情報からは分かりません」と答えてください。
- * 回答は自然な日本語の文章で構成し、記事番号などのメタ情報は含めないでください。
+ * [参照情報]に書かれている内容がユーザーの質問に最も適切であれば、その情報を**最も明確に活用し**回答してください。
+ * [参照情報]の内容を最優先しつつ、自然な会話として成立させるために、一般的な知識や文脈を補完して回答しても構いません。
+ * 回答は自然な日本語の文章で構成し、記事番号などのメタ情報を含めないでください。
 `;
 
 function appendMessage(sender, text, html = false) {
@@ -65,19 +73,22 @@ async function initializeKuromoji() {
 }
 
 async function initializeWebLLM() {
+    if (isColabMode) return null;
+
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    
-    if (isIOS || isSafari && currentLLMModel.includes('7B')) {
+    const modelName = currentLLMModel;
+
+    if (isIOS || isSafari && modelName.includes('7B')) {
         statusDiv.textContent = "警告: 7BモデルはiOS/Safari環境では動作不安定の可能性があります。";
     } else {
-        statusDiv.textContent = `${currentLLMModel} を準備中...`;
+        statusDiv.textContent = `${modelName} を準備中...`;
     }
 
     if(progressBar) progressBar.style.width = '0%';
 
     try {
-        const engine = await CreateMLCEngine(currentLLMModel, { 
+        const engine = await CreateMLCEngine(modelName, { 
             initProgressCallback: (info) => {
                 let percentage = 0;
                 if (info.progress && info.total) {
@@ -102,26 +113,47 @@ async function init() {
         inputElement.disabled = true;
         searchButton.disabled = true;
         if (modelSelect) modelSelect.disabled = true;
+        if (personalitySelect) personalitySelect.disabled = true;
 
         statusDiv.textContent = "辞書データをロード中...";
-        kuromojiTokenizer = await initializeKuromoji();
-        
-        statusDiv.textContent = `${currentLLMModel} エンジン起動中...`;
-        llmChatModule = await initializeWebLLM();
+        if (!kuromojiTokenizer) {
+            kuromojiTokenizer = await initializeKuromoji();
+        }
 
-        statusDiv.textContent = "準備完了";
+        isColabMode = (currentLLMModel === 'colab-api');
+
+        if (isColabMode) {
+            if (colabApiUrl.includes('ここ')) {
+                 statusDiv.textContent = "エラー: Colab API URLが設定されていません。";
+                 appendMessage('ai', `初期化エラー\nファイル内の \`colabApiUrl\` を有効なURLに設定してください。`, true);
+                 throw new Error("Colab API URL not configured.");
+            }
+            statusDiv.textContent = `Colab APIモード (URL: ${colabApiUrl.substring(8, 20)}...) : 準備完了`;
+            llmChatModule = null; 
+            appendMessage('ai', `**Colab API Mode** で開始します。質問をどうぞ。`, true);
+
+        } else {
+            statusDiv.textContent = `${currentLLMModel} エンジン起動中...`;
+            llmChatModule = await initializeWebLLM();
+            statusDiv.textContent = "準備完了";
+            appendMessage('ai', `準備完了 (${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'})。質問をどうぞ。`, true);
+        }
+
         inputElement.disabled = false;
         searchButton.disabled = false;
         if (modelSelect) modelSelect.disabled = false;
-
-        appendMessage('ai', `準備完了 (${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'})。質問をどうぞ。`, true);
+        if (personalitySelect) personalitySelect.disabled = false;
 
     } catch (e) {
         statusDiv.textContent = `エラー: ${e.message}`;
         inputElement.disabled = true;
         searchButton.disabled = true;
         if (modelSelect) modelSelect.disabled = true;
-        appendMessage('ai', `**初期化エラー**\n${e.message}`, true);
+        if (personalitySelect) personalitySelect.disabled = true;
+        appendMessage('ai', `初期化エラー\n${e.message}`, true);
+        
+        if (modelSelect) modelSelect.disabled = false;
+        if (personalitySelect) personalitySelect.disabled = false;
     }
 }
 
@@ -135,11 +167,11 @@ async function fetchWikipediaArticles(keyword) {
     try {
         const searchRes = await fetch(apiUrl + '?' + new URLSearchParams(searchParams).toString());
         const searchData = await searchRes.json();
-        
+
         if (!searchData.query || !searchData.query.search || searchData.query.search.length === 0) {
             return { success: false, text: "関連情報が見つかりませんでした。" };
         }
-        
+
         const pageIds = searchData.query.search.map(r => r.pageid).join('|');
         const extractParams = {
             action: 'query', format: 'json', origin: '*',
@@ -153,7 +185,7 @@ async function fetchWikipediaArticles(keyword) {
         let combinedText = "";
         let sources = [];
         const pages = extractData.query.pages;
-        
+
         for (const pageId in pages) {
             const article = pages[pageId];
             if (article.extract) {
@@ -178,7 +210,7 @@ async function fetchWikipediaArticles(keyword) {
 
 function prioritizeContext(context, userInput) {
     if (!kuromojiTokenizer) return context.substring(0, MAX_CONTEXT_TOKENS);
-    
+
     const userTokens = kuromojiTokenizer.tokenize(userInput)
         .filter(t => t.pos === '名詞' && t.basic_form !== '*').map(t => t.basic_form);
 
@@ -188,7 +220,7 @@ function prioritizeContext(context, userInput) {
     for (const sentence of sentences) {
         const sentenceTokens = kuromojiTokenizer.tokenize(sentence)
             .filter(t => t.pos === '名詞' && t.basic_form !== '*').map(t => t.basic_form);
-        
+
         let score = 0;
         for (const uToken of userTokens) {
             if (sentenceTokens.includes(uToken)) {
@@ -220,7 +252,7 @@ function validateLLMResponse(response, context) {
     const contextTokens = kuromojiTokenizer.tokenize(context)
         .filter(t => t.pos === '名詞' && t.basic_form !== '*' && t.basic_form.length > 1)
         .map(t => t.basic_form);
-    
+
     const responseTokens = kuromojiTokenizer.tokenize(response)
         .filter(t => t.pos === '名詞' && t.basic_form !== '*' && t.basic_form.length > 1)
         .map(t => t.basic_form);
@@ -232,8 +264,7 @@ function validateLLMResponse(response, context) {
     }
 
     const totalResponseNouns = responseTokens.length;
-    if (totalResponseNouns > 5 && (overlap / totalResponseNouns) < 0.15) {
-        return `[回答破棄] 生成回答が参照情報に基づいていると確認できませんでした。(一致率: ${Math.round((overlap/totalResponseNouns)*100)}%)`;
+    if (totalResponseNouns > 10 && (overlap / totalResponseNouns) < 0.05) { 
     }
     return response;
 }
@@ -251,7 +282,9 @@ function buildFullPrompt(context, userInput) {
         }
     }
 
-    const systemPrompt = SYSTEM_PROMPT.replace('[USERNAME]', userName || 'ユーザー');
+    const selectedPersonality = personalitySelect ? personalitySelect.value : 'friendly';
+    const systemPrompt = SYSTEM_PROMPT_TEMPLATE(selectedPersonality).replace('[USERNAME]', userName || 'ユーザー');
+    
     return `
 ${systemPrompt}
 [過去の会話履歴]
@@ -270,18 +303,44 @@ async function generateLLMResponse(prompt, contextForValidation) {
     const bubbleElement = aiMessageElement.querySelector('.bubble');
 
     try {
-        const completion = await llmChatModule.chat.completions.create({
-            messages: [{ role: "user", content: prompt }],
-            stream: true,
-            ...LLM_CONFIG
-        });
+        if (isColabMode) {
+            
+            bubbleElement.textContent = "Colabで生成中...";
 
-        for await (const chunk of completion) {
-            const delta = chunk.choices[0].delta.content;
-            if (delta) {
-                aiResponse += delta;
-                bubbleElement.textContent = aiResponse;
-                chatWindow.scrollTop = chatWindow.scrollHeight;
+            const response = await fetch(colabApiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    temperature: LLM_CONFIG.temperature 
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status} (${response.statusText})`);
+            }
+
+            const data = await response.json();
+            aiResponse = data.text || data.response || "No response text";
+            bubbleElement.textContent = aiResponse;
+
+        } else {
+            
+            if (!llmChatModule) throw new Error("WebLLM Engine not initialized");
+
+            const completion = await llmChatModule.chat.completions.create({
+                messages: [{ role: "user", content: prompt }],
+                stream: true,
+                ...LLM_CONFIG
+            });
+
+            for await (const chunk of completion) {
+                const delta = chunk.choices[0].delta.content;
+                if (delta) {
+                    aiResponse += delta;
+                    bubbleElement.textContent = aiResponse;
+                    chatWindow.scrollTop = chatWindow.scrollHeight;
+                }
             }
         }
 
@@ -292,15 +351,22 @@ async function generateLLMResponse(prompt, contextForValidation) {
         } else {
             chatHistory.push({ role: 'assistant', content: aiResponse });
         }
+
     } catch (error) {
         bubbleElement.textContent += ` (エラー: ${error.message})`;
+        console.error("生成エラー:", error);
     }
     chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
+
 async function processUserInput() {
     const userInput = inputElement.value.trim();
-    if (!userInput || !llmChatModule || !kuromojiTokenizer) return;
+    if (!userInput) return;
+    if (!kuromojiTokenizer) {
+        alert("システムがロードを完了していません。");
+        return;
+    }
 
     appendMessage('user', userInput);
     chatHistory.push({ role: 'user', content: userInput });
@@ -333,6 +399,7 @@ async function processUserInput() {
     }
 
     const fullPrompt = buildFullPrompt(context, userInput);
+
     await generateLLMResponse(fullPrompt, context);
 
     const sourceMessage = `<small>Sources: ${wikiResult.sources.join(', ')}</small>`;
@@ -342,13 +409,15 @@ async function processUserInput() {
 
 function handleModelChange() {
     if (modelSelect && currentLLMModel !== modelSelect.value) {
-        if (llmChatModule && typeof llmChatModule.unload === 'function') {
+        if (!isColabMode && llmChatModule && typeof llmChatModule.unload === 'function') {
              llmChatModule.unload();
         }
+        
         llmChatModule = null;
         chatHistory.length = 0; 
         currentLLMModel = modelSelect.value;
-        appendMessage('ai', `モデルを **${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'}** に変更しました。再ロードします...`, true);
+        
+        appendMessage('ai', `設定を変更しました。再初期化します...`, true);
         init();
     }
 }
@@ -363,10 +432,26 @@ function handleLogin() {
     loginArea.style.display = 'none';
     appContent.style.display = 'block';
     chatWindow.innerHTML = ''; 
+
+    if (modelSelect) {
+        let colabOption = modelSelect.querySelector('option[value="colab-api"]');
+        if (!colabOption) {
+            colabOption = document.createElement('option');
+            colabOption.value = "colab-api";
+            colabOption.textContent = "☁️ Google Colab (High-Spec API)";
+            modelSelect.appendChild(colabOption);
+        }
+        
+        modelSelect.addEventListener('change', handleModelChange);
+        currentLLMModel = modelSelect.value;
+    }
     
-    if (modelSelect) modelSelect.addEventListener('change', handleModelChange);
-    if (modelSelect) currentLLMModel = modelSelect.value;
-    
+    if (personalitySelect) {
+        personalitySelect.addEventListener('change', () => {
+            appendMessage('ai', `AIの性格を **${personalitySelect.options[personalitySelect.selectedIndex].textContent}** に変更しました。`, true);
+        });
+    }
+
     init();
 }
 
