@@ -29,15 +29,29 @@
             padding: 20px 0 10px;
             margin: 0;
         }
-        .model-selector {
-            text-align: center;
-            margin-bottom: 15px;
+        .settings-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px 15px;
+            font-size: 0.85rem;
         }
-        .model-selector select {
+        .settings-container > div {
+            display: flex;
+            align-items: center;
+        }
+        .settings-container label {
+            color: var(--color-gray);
+            margin-right: 5px;
+            white-space: nowrap; 
+        }
+        .settings-container select,
+        .settings-container input[type="text"] { 
             padding: 5px 10px;
             border-radius: 5px;
             border: 1px solid var(--color-border);
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+            max-width: 180px; 
         }
         #status-area {
             text-align: center;
@@ -175,15 +189,6 @@
 </head>
 <body>
     <h1>AIRAGASS</h1>
-    
-       <div class="model-selector">
-        <label for="model-select" style="font-size: 0.8rem; color: var(--color-gray);">モデル:</label>
-        <select id="model-select">
-            <option value="Phi-2-v2-q4f16_1" selected>Phi-2 (軽量・高速)</option>
-            
-            <option value="Mistral-7B-Instruct-v0.2-q4f16_1">Mistral-7B (高精度・重い)</option>
-        </select>
-    </div>
 
     <div id="status-area">
         <div id="loading-status">待機中...</div>
@@ -193,11 +198,25 @@
     </div>
 
     <div id="login-area">
-        <input type="text" id="username-input" placeholder="名前を入力してください">
+        <input type="text" id="username-input" placeholder="ニックネームを入力してください">
         <button id="login-button">開始</button>
     </div>
 
     <div class="app-content">
+        <div class="settings-container">
+            <div class="model-selector">
+                <label for="model-select">モデル:</label>
+                <select id="model-select">
+                    <option value="Phi-2-v2-q4f16_1" selected>Phi-2 (軽量・高速)</option>
+                    <option value="Mistral-7B-Instruct-v0.2-q4f16_1">Mistral-7B (高精度・重い)</option>
+                </select>
+            </div>
+            <div class="personality-selector">
+                <label for="personality-input">性格設定:</label>
+                <input type="text" id="personality-input" value="親しみやすく丁寧な言葉遣いをするAIアシスタントです。" placeholder="AIの性格を自由に設定してください">
+            </div>
+        </div>
+
         <div id="chat-window"></div>
         <div class="input-area">
             <input type="text" id="keyword-input" placeholder="入力..." disabled>
