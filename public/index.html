@@ -185,7 +185,7 @@
             fill: white;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+    <script src="./kuromoji.js"></script>
 </head>
 <body>
     <h1>AIRAGASS</h1>
@@ -207,8 +207,10 @@
             <div class="model-selector">
                 <label for="model-select">モデル:</label>
                 <select id="model-select">
-                    <option value="Phi-2-v2-q4f16_1" selected>Phi-2 (軽量・高速)</option>
-                    <option value="Mistral-7B-Instruct-v0.2-q4f16_1">Mistral-7B (高精度・重い)</option>
+                    <option value="Qwen1.5-0.5B-Chat-q4f16_1" selected>Qwen 0.5B (最軽量・推奨)</option>
+                    <option value="TinyLlama-1.1B-Chat-v1.0-q4f16_1">TinyLlama 1.1B (軽量)</option>
+                    <option value="Phi-2-v2-q4f16_1">Phi-2 (標準)</option>
+                    <option value="Mistral-7B-Instruct-v0.2-q4f16_1">Mistral-7B (重い)</option>
                 </select>
             </div>
             <div class="personality-selector">
