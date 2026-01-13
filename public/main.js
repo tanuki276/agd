@@ -29,7 +29,7 @@ const LLM_CONFIG = {
     top_p: 0.9
 };
 
-const DICT_BASE_URL = './dict/';
+const DICT_BASE_URL = 'dict/';
 
 const SYSTEM_PROMPT_TEMPLATE = (customPersonality) => {
     const defaultPersonality = "親しみやすく丁寧な言葉遣いをするAIアシスタントです。";
