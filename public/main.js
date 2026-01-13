@@ -1,4 +1,4 @@
-Import { CreateMLCEngine } from '@mlc-ai/web-llm';
+import { CreateMLCEngine } from '@mlc-ai/web-llm';
 
 const inputElement = document.getElementById('keyword-input');
 const searchButton = document.getElementById('search-button');
@@ -15,9 +15,9 @@ const personalityInput = document.getElementById('personality-input');
 let kuromojiTokenizer = null;
 let llmChatModule = null; 
 let userName = null;
-let currentLLMModel = modelSelect ? modelSelect.value : "Phi-2-v2-q4f16_1";
+let currentLLMModel = modelSelect ? modelSelect.value : "Qwen1.5-0.5B-Chat-q4f16_1";
 let isColabMode = false;
-let colabApiUrl = "ここ"; 
+let colabApiUrl = ""; 
 
 const chatHistory = [];
 const MAX_CONTEXT_TOKENS = 2500;
@@ -29,13 +29,12 @@ const LLM_CONFIG = {
     top_p: 0.9
 };
 
-const DICT_BASE_URL = 'https://tanuki276.github.io/agd/dict/';
+const DICT_BASE_URL = './dict/';
 
-// 性格設定のプロンプトを、Inputの値を直接使うように変更
 const SYSTEM_PROMPT_TEMPLATE = (customPersonality) => {
     const defaultPersonality = "親しみやすく丁寧な言葉遣いをするAIアシスタントです。";
     const personality = customPersonality && customPersonality.trim() !== "" ? customPersonality : defaultPersonality;
-    
+
     return `
 あなたは、${personality}
 ユーザー名: [USERNAME]
@@ -64,6 +63,7 @@ async function initializeKuromoji() {
     return new Promise((resolve, reject) => {
         kuromoji.builder({ dicPath: DICT_BASE_URL }).build(function(err, tokenizer) {
             if (err) {
+                alert("リソースロードエラー: " + err.message);
                 reject(err);
             } else {
                 resolve(tokenizer);
@@ -80,7 +80,7 @@ async function initializeWebLLM() {
     const modelName = currentLLMModel;
 
     if (isIOS || isSafari && modelName.includes('7B')) {
-        statusDiv.textContent = "警告: 7BモデルはiOS/Safari環境では動作不安定の可能性があります。";
+        statusDiv.textContent = "警告: このモデルはモバイル及び低スペックなPC環境では動作不安定の可能性があります。";
     } else {
         statusDiv.textContent = `${modelName} を準備中...`;
     }
@@ -115,7 +115,7 @@ async function init() {
         if (modelSelect) modelSelect.disabled = true;
         if (personalityInput) personalityInput.disabled = true;
 
-        statusDiv.textContent = "辞書データをロード中...";
+        statusDiv.textContent = "リソースデータをロード中...";
         if (!kuromojiTokenizer) {
             kuromojiTokenizer = await initializeKuromoji();
         }
@@ -123,20 +123,20 @@ async function init() {
         isColabMode = (currentLLMModel === 'colab-api');
 
         if (isColabMode) {
-            if (colabApiUrl.includes('YOUR-COLAB-NGROK-URL')) {
-                 statusDiv.textContent = "エラー: Colab API URLが設定されていません。";
-                 appendMessage('ai', `**初期化エラー**\n運営者様へ: JSファイル内の \`colabApiUrl\` を有効なURLに設定してください。`, true);
+            if (colabApiUrl.includes('YOUR-COLAB-NGROK-URL') || colabApiUrl === "") {
+                 statusDiv.textContent = "エラー:サーバーの設定が完了していません";
+                 appendMessage('ai', `**初期化エラー**\nJSファイル内の \`colabApiUrl\` を設定してください。`, true);
                  throw new Error("Colab API URL not configured.");
             }
-            statusDiv.textContent = `Colab APIモード (URL: ${colabApiUrl.substring(8, 20)}...) : 準備完了`;
+            statusDiv.textContent = `Colab APIモード: 準備完了`;
             llmChatModule = null; 
-            appendMessage('ai', `**Colab API Mode** で開始します。質問をどうぞ。`, true);
+            appendMessage('ai', `**Colab API Mode** で開始します。`, true);
 
         } else {
             statusDiv.textContent = `${currentLLMModel} エンジン起動中...`;
             llmChatModule = await initializeWebLLM();
             statusDiv.textContent = "準備完了";
-            appendMessage('ai', `準備完了 (${currentLLMModel.includes('7B') ? 'High Engine' : 'NORMAL Engine'})。質問をどうぞ。`, true);
+            appendMessage('ai', `準備完了 (${currentLLMModel})。質問をどうぞ。`, true);
         }
 
         inputElement.disabled = false;
@@ -151,7 +151,8 @@ async function init() {
         if (modelSelect) modelSelect.disabled = true;
         if (personalityInput) personalityInput.disabled = true;
         appendMessage('ai', `**初期化エラー**\n${e.message}`, true);
-        
+        alert(`初期化エラー: ${e.message}`);
+
         if (modelSelect) modelSelect.disabled = false;
         if (personalityInput) personalityInput.disabled = false;
     }
@@ -282,10 +283,9 @@ function buildFullPrompt(context, userInput) {
         }
     }
 
-    // Inputの値を取得
     const customPersonality = personalityInput ? personalityInput.value : '';
     const systemPrompt = SYSTEM_PROMPT_TEMPLATE(customPersonality).replace('[USERNAME]', userName || 'ユーザー');
-    
+
     return `
 ${systemPrompt}
 [過去の会話履歴]
@@ -305,7 +305,7 @@ async function generateLLMResponse(prompt, contextForValidation) {
 
     try {
         if (isColabMode) {
-            
+
             bubbleElement.textContent = "Colabで生成中...";
 
             const response = await fetch(colabApiUrl, {
@@ -326,7 +326,7 @@ async function generateLLMResponse(prompt, contextForValidation) {
             bubbleElement.textContent = aiResponse;
 
         } else {
-            
+
             if (!llmChatModule) throw new Error("WebLLM Engine not initialized");
 
             const completion = await llmChatModule.chat.completions.create({
@@ -413,11 +413,11 @@ function handleModelChange() {
         if (!isColabMode && llmChatModule && typeof llmChatModule.unload === 'function') {
              llmChatModule.unload();
         }
-        
+
         llmChatModule = null;
         chatHistory.length = 0; 
         currentLLMModel = modelSelect.value;
-        
+
         appendMessage('ai', `設定を変更しました。再初期化します...`, true);
         init();
     }
@@ -442,12 +442,10 @@ function handleLogin() {
             colabOption.textContent = "☁️ Google Colab (High-Spec API)";
             modelSelect.appendChild(colabOption);
         }
-        
+
         modelSelect.addEventListener('change', handleModelChange);
         currentLLMModel = modelSelect.value;
     }
-    
-    // 性格設定はInputフィールドになったため、ここでは初期化に関する処理は不要
 
     init();
 }
