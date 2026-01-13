@@ -2,13 +2,13 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './', 
-  
+
   resolve: {
     alias: {
       path: 'path-browserify',
     },
   },
-  
+
   build: {
     outDir: 'dist',
     rollupOptions: {
@@ -17,4 +17,5 @@ export default defineConfig({
       },
     },
   },
+  publicDir: './', 
 });
